@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>黄岛商户 · 就近与顺路拜访（高德一体化）</title>
+<style>
+  html,body,#map{height:100%;margin:0;padding:0}
+  .ui{position:absolute;top:10px;left:10px;z-index:9999;background:rgba(255,255,255,.97);
+      border-radius:12px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);
+      font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;line-height:1.6;max-width:640px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .btn{padding:6px 10px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;cursor:pointer}
+  .ip{height:32px;border:1px solid #e5e5e5;border-radius:8px;padding:0 10px}
+  .small{font-size:12px;color:#666}
+  .stat{margin-top:4px;color:#444}
+  .ok{color:#2c7a7b}.warn{color:#b34700}.err{color:#c53030}
+  .list{max-height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:6px;margin-top:6px}
+  .item{padding:4px 0;border-bottom:1px dashed #eee}
+  .item:last-child{border-bottom:none}
+</style>
+
+<!-- 必须在 SDK 之前：你的 JS API 安全密钥 -->
+<script>
+  window._AMapSecurityConfig = { securityJsCode: "d9ca5519268c9fc0e9d8e1da9cc03a28" };
+</script>
+<!-- 高德 JS API（使用你的 Web端 Key），无需额外插件（我们只用 Marker/InfoWindow） -->
+<script src="https://webapi.amap.com/maps?v=2.0&key=7d26448f257946798a105c1bc02d653b&plugin=AMap.Geocoder"></script>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="ui">
+  <div><b>✅ 黄岛商户 · 就近与顺路拜访</b></div>
+  <div id="health" class="small">初始化中…</div>
+
+  <div class="row">
+    <button class="btn" id="btnLocate">📍 获取当前位置</button>
+    <input class="ip" id="manualLng" placeholder="经度(lng)" style="width:140px"/>
+    <input class="ip" id="manualLat" placeholder="纬度(lat)" style="width:140px"/>
+    <button class="btn" id="btnUseManual">用手动坐标</button>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="btnNearest">🔎 离我最近（前10）</button>
+    <button class="btn" id="btnRoute">🧭 生成顺路拜访顺序</button>
+    <button class="btn" id="btnClearRoute">清除路线</button>
+  </div>
+
+  <div class="row">
+    <input class="ip" id="kw" placeholder="搜索姓名/站号/地址关键字" style="flex:1 1 260px"/>
+    <button class="btn" id="btnSearch">搜索</button>
+    <button class="btn" id="btnShowAll">显示全部</button>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="btnExportKML">⬇️ 导出KML</button>
+    <button class="btn" id="btnExportCSV">⬇️ 导出CSV</button>
+    <span class="small">（可导入支持批量收藏的导航/地图应用）</span>
+  </div>
+
+  <div class="stat" id="stat">—</div>
+  <div class="list" id="list"></div>
+</div>
+
+<script>
+// ========== 数据：地址列表（会在线地理编码一次，结果缓存 localStorage） ==========
+const RAW = [
+  {"站号":"3703006888","姓名":"赵保亮","地址":"江山南路288号文定江山314号体育彩票","电话":""},
+  {"站号":"3703006180","姓名":"王海洋","地址":"太行山一路支路47号","电话":"17114447444"},
+  {"站号":"3703005343","姓名":"李艳洁","地址":"东江路怡和家园北区487号","电话":""},
+  {"站号":"3703004225","姓名":"马振群","地址":"珠江路青年公寓106号体育彩票","电话":""},
+  {"站号":"3703005906","姓名":"薛红","地址":"黄岛区洞庭山路12号","电话":""},
+  {"站号":"3703004348","姓名":"董艳","地址":"富春江路136号体育彩票","电话":""},
+  {"站号":"3703003831","姓名":"于海霞","地址":"庐山路77号家佳源南门","电话":""},
+  {"站号":"3703003188","姓名":"刘秋霞","地址":"辛安街道开拓路802号","电话":""},
+  {"站号":"3703008034","姓名":"鲍金海","地址":"钱塘江路268号-6号网点","电话":""},
+  {"站号":"3703003279","姓名":"牟善亮","地址":"黄埔江路507号体育彩票","电话":""},
+  {"站号":"3703003070","姓名":"林沛沛","地址":"长江路街道香江路海尔悦兰庭二期1067号","电话":""},
+  {"站号":"3703005499","姓名":"陈爱丽","地址":"辛安街道五龙河路772号","电话":""},
+  {"站号":"3703006183","姓名":"赵其伟","地址":"舟山岛街50号体育彩票","电话":""},
+  {"站号":"3703003874","姓名":"辛凤娟","地址":"富春江路295号体育彩票","电话":""},
+  {"站号":"3703006305","姓名":"李静","地址":"五台山路贵信花园1114-8号","电话":""},
+  {"站号":"3703004129","姓名":"薛勇","地址":"江山丽城榕江路12号网点","电话":""},
+  {"站号":"3703003773","姓名":"王明明","地址":"华顶山路海尔山海湾西门体育彩票","电话":""},
+  {"站号":"3703006556","姓名":"张卫佳","地址":"团结路774号","电话":""},
+  {"站号":"3703006550","姓名":"赵超群","地址":"嘉陵江西路693号网点","电话":""},
+  {"站号":"3703004208","姓名":"宋云战","地址":"中德生态园福莱社区福莱大街26号","电话":""},
+  {"站号":"3703007880","姓名":"咸坤","地址":"汉江路1号内28-15B","电话":""},
+  {"站号":"3703003193","姓名":"刘忠玲","地址":"五台山路784号","电话":""},
+  {"站号":"3703004170","姓名":"陈敬飞","地址":"红石崖街道芙蓉路18号","电话":""},
+  {"站号":"3703007177","姓名":"王晨","地址":"长江西路177号长江国际负一层","电话":""},
+  {"站号":"3703004187","姓名":"王冰","地址":"江山南路御园五号216-11","电话":""},
+  {"站号":"3703005904","姓名":"罗京","地址":"黄河中路146-3号","电话":""},
+  {"站号":"3703006188","姓名":"侯玉娟","地址":"长江中路7号13号网点","电话":""},
+  {"站号":"3703007632","姓名":"张新晓","地址":"团结路与汾河路交叉口路南40米","电话":""},
+  {"站号":"3703007605","姓名":"曲成竞","地址":"紫金山路27号小可音乐","电话":""},
+  {"站号":"3703004437","姓名":"薛新惠","地址":"燕山路278号-4","电话":""},
+  {"站号":"3703003642","姓名":"薛秀芳","地址":"金山路127号","电话":""},
+  {"站号":"3703008152","姓名":"邹洪永","地址":"珠江路106号凤凰城西门31-14网点","电话":""},
+  {"站号":"3703008037","姓名":"赵艳","地址":"长白山路822-12号商铺","电话":""},
+  {"站号":"3703008156","姓名":"江福春","地址":"金沙滩路966号凤凰之声大剧院广场凤凰夜市","电话":""},
+  {"站号":"3703003493","姓名":"吕同华","地址":"黄岛街道大福岛路68号","电话":""},
+  {"站号":"3703007314","姓名":"王莉","地址":"长江路街道万科新都会二期吴江路298号","电话":""},
+  {"站号":"3703005491","姓名":"戚霞","地址":"长江路街道北江路132-2号","电话":""},
+  {"站号":"3703307058","姓名":"孙明燕","地址":"江山南路116号鲁商蓝岸国际","电话":"15563919457"}
+];
+const CITY_PREFIX = "青岛市黄岛区";
+const CACHE_KEY = "amap_huangdao_coords_v1";
+
+// ========== 初始化地图 ==========
+const map = new AMap.Map('map',{viewMode:'3D',zoom:12,center:[120.1695,35.9632]});
+const info = new AMap.InfoWindow({offset:new AMap.Pixel(0,-10)});
+const healthEl = document.getElementById('health');
+let markers = [], currentPos = null, routeLine = null;
+
+// ========== 工具函数 ==========
+const H = (lng1,lat1,lng2,lat2)=>{ // Haversine 距离（米）
+  const toRad=x=>x*Math.PI/180; const R=6371000;
+  const dLat=toRad(lat2-lat1), dLng=toRad(lng2-lng1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+};
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const loadCache = ()=>{try{return JSON.parse(localStorage.getItem(CACHE_KEY)||'{}')}catch{return{}}};
+const saveCache = o=>localStorage.setItem(CACHE_KEY,JSON.stringify(o||{}));
+const keyFor = addr => (CITY_PREFIX + (addr||'').trim()).trim();
+
+function renderList(arr, title='列表'){
+  const stat = document.getElementById('stat');
+  stat.innerHTML = `${title}：共 <b>${arr.length}</b> 个${currentPos? '（已按距离计算）':''}`;
+  const list = document.getElementById('list'); list.innerHTML = '';
+  arr.forEach((r,i)=>{
+    const div = document.createElement('div');
+    const nav = r.lng&&r.lat ? `https://uri.amap.com/navigation?to=${r.lng},${r.lat},${encodeURIComponent(r.姓名||r.站号||'目标')}&mode=car` : '';
+    div.className='item';
+    div.innerHTML = `<b>${i+1}. ${r.姓名||'未名'}</b> <span class="small">（${r.站号||''}）</span>
+      <br/>地址：${r.地址||''} ${r.电话?`· 📞${r.电话}`:''}
+      ${r.dist!=null?`<br/><span class="small">距离：${(r.dist/1000).toFixed(2)}km</span>`:''}
+      ${nav?`<br/><a href="${nav}" target="_blank">🚗 导航</a>`:''}`;
+    list.appendChild(div);
+  });
+}
+
+function makeMarker(r){
+  const m = new AMap.Marker({position:[r.lng,r.lat],title:r.姓名||r.站号||''});
+  m.on('click',()=>{
+    const nav = `https://uri.amap.com/navigation?to=${r.lng},${r.lat},${encodeURIComponent(r.姓名||r.站号||'目标')}&mode=car`;
+    info.setContent(`<div style="font-size:14px;line-height:1.6;">
+      <div><b>${r.姓名||'未名'}</b> <span style="color:#999;">（站号：${r.站号||''}）</span></div>
+      <div>地址：${r.地址||''}</div>
+      <div>电话：${r.电话||'—'}</div>
+      <div style="margin-top:6px;"><a href="${nav}" target="_blank" style="color:#1677ff;text-decoration:none;">🚗 用高德导航</a></div>
+    </div>`);
+    info.open(map, m.getPosition());
+  });
+  map.add(m); markers.push(m);
+}
+
+function drawAllPoints(rows){
+  markers.forEach(m=>map.remove(m)); markers=[];
+  rows.filter(r=>r.lng&&r.lat).forEach(makeMarker);
+  if (markers.length) map.setFitView(markers,true,[80,80,80,80],16);
+}
+
+// ========== 地理编码（顺序 + 缓存）==========
+async function geocodeAll(){
+  const cache = loadCache();
+  const gc = new AMap.Geocoder({city:CITY_PREFIX});
+  let done=0, total=RAW.length;
+  healthEl.textContent = `开始地理编码（首次会稍慢，自动缓存）…`;
+  for(const r of RAW){
+    const addr=(r.地址||'').trim(); if(!addr){ done++; continue; }
+    const k = keyFor(addr);
+    if (!cache[k]){
+      await new Promise(res=>{
+        gc.getLocation(CITY_PREFIX+addr,(s,result)=>{
+          if (s==='complete'&&result.geocodes&&result.geocodes.length){
+            const loc=result.geocodes[0].location; cache[k]={lng:loc.lng,lat:loc.lat};
+          } res();
+        });
+      });
+      await sleep(100);
+    }
+    done++;
+  }
+  saveCache(cache);
+  healthEl.innerHTML = `编码完成，已缓存 <b>${Object.keys(cache).length}</b> 条；下次打开将秒开。`;
+  // 组装行
+  const rows = RAW.map(r=>{
+    const c = loadCache()[keyFor(r.地址)];
+    return {...r, lng:c&&c.lng, lat:c&&c.lat};
+  });
+  drawAllPoints(rows);
+  renderList(rows,'全部站点');
+  return rows;
+}
+
+// ========== 当前位置 ==========
+async function getCurrentPosition(){
+  return new Promise(resolve=>{
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos=>resolve([pos.coords.longitude,pos.coords.latitude]),
+        _=>resolve(null),
+        {enableHighAccuracy:true,timeout:8000}
+      );
+    } else resolve(null);
+  });
+}
+
+// ========== 近邻规划（贪心法） ==========
+function planGreedy(start, points){ // start: {lng,lat}
+  const remain = points.slice();
+  const order = []; let cur = {lng:start.lng, lat:start.lat};
+  while(remain.length){
+    remain.forEach(p=>p._d = H(cur.lng,cur.lat,p.lng,p.lat));
+    remain.sort((a,b)=>a._d - b._d);
+    const nxt = remain.shift();
+    order.push(nxt);
+    cur = {lng:nxt.lng, lat:nxt.lat};
+  }
+  order.forEach(p=>delete p._d);
+  return order;
+}
+
+function drawRoute(order, start){
+  if (routeLine) { map.remove(routeLine); routeLine=null; }
+  const path = [ [start.lng,start.lat], ...order.map(p=>[p.lng,p.lat]) ];
+  routeLine = new AMap.Polyline({path, strokeWeight:6, strokeColor:'#1677ff', strokeOpacity:0.8});
+  map.add(routeLine);
+  const allMarkers = markers.slice();
+  map.setFitView([routeLine, ...allMarkers], true, [60,60,60,360], 16);
+}
+
+// ========== 导出 ==========
+function download(name,content,type){ const blob=new Blob([content],{type}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+function exportCSV(rows){
+  const header = '站号,姓名,地址,电话,经度,纬度\n';
+  const body = rows.map(r=>[r.站号||'',r.姓名||'',r.地址||'',r.电话||'',r.lng||'',r.lat||''].map(v=>`"${(v+'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  download('黄岛商户.csv', header+body, 'text/csv;charset=utf-8');
+}
+function exportKML(rows){
+  const placemarks = rows.filter(r=>r.lng&&r.lat).map(r=>
+  `<Placemark>
+    <name>${(r.姓名||r.站号||'标注').replace(/[<&>]/g,'')}</name>
+    <description><![CDATA[站号：${r.站号||''}<br/>地址：${r.地址||''}<br/>电话：${r.电话||'—'}]]></description>
+    <Point><coordinates>${r.lng},${r.lat},0</coordinates></Point>
+  </Placemark>`).join('\n');
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
+  <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>黄岛商户</name>${placemarks}</Document></kml>`;
+  download('黄岛商户.kml', kml, 'application/vnd.google-earth.kml+xml');
+}
+
+// ========== 事件 ==========
+let ALL_ROWS = [];
+(async function init(){
+  healthEl.textContent = '初始化地图完成，准备编码…';
+  ALL_ROWS = await geocodeAll();
+})();
+
+document.getElementById('btnLocate').onclick = async ()=>{
+  const p = await getCurrentPosition();
+  if (!p) { healthEl.className='warn'; healthEl.textContent='无法获取系统定位（建议用 HTTPS 或允许定位），可手动输入坐标'; return; }
+  currentPos = {lng:p[0],lat:p[1]};
+  healthEl.className='ok'; healthEl.textContent=`已获取当前位置：${p[0].toFixed(6)}, ${p[1].toFixed(6)}`;
+  new AMap.Marker({position:p, map, title:'我的位置', icon:'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png'});
+  map.setZoomAndCenter(13, p);
+};
+
+document.getElementById('btnUseManual').onclick = ()=>{
+  const lng = parseFloat(document.getElementById('manualLng').value);
+  const lat = parseFloat(document.getElementById('manualLat').value);
+  if (isFinite(lng) && isFinite(lat)) {
+    currentPos = {lng,lat};
+    healthEl.className='ok'; healthEl.textContent=`已使用手动坐标：${lng}, ${lat}`;
+    new AMap.Marker({position:[lng,lat], map, title:'我的位置', icon:'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png'});
+    map.setZoomAndCenter(13, [lng,lat]);
+  } else {
+    healthEl.className='warn'; healthEl.textContent='请输入正确的经纬度（如 120.1695 / 35.9632）';
+  }
+};
+
+document.getElementById('btnNearest').onclick = ()=>{
+  if (!currentPos) { healthEl.className='warn'; healthEl.textContent='请先获取当前位置或手动输入坐标'; return; }
+  const rows = ALL_ROWS.filter(r=>r.lng&&r.lat).map(r=>({...r, dist:H(currentPos.lng,currentPos.lat,r.lng,r.lat)}));
+  rows.sort((a,b)=>a.dist-b.dist);
+  renderList(rows.slice(0,10), '离我最近（前10）');
+};
+
+document.getElementById('btnRoute').onclick = ()=>{
+  if (!currentPos) { healthEl.className='warn'; healthEl.textContent='请先获取当前位置或手动输入坐标'; return; }
+  const points = ALL_ROWS.filter(r=>r.lng&&r.lat);
+  const order = planGreedy(currentPos, points);
+  // 展示列表（附导航链接）
+  const withDist = order.map(r=>({...r, dist:H(currentPos.lng,currentPos.lat,r.lng,r.lat)}));
+  renderList(withDist, '顺路拜访顺序（近邻法）');
+  drawRoute(order, currentPos);
+};
+
+document.getElementById('btnClearRoute').onclick = ()=>{
+  if (routeLine) { map.remove(routeLine); routeLine=null; }
+  renderList(ALL_ROWS,'全部站点'); drawAllPoints(ALL_ROWS);
+};
+
+document.getElementById('btnSearch').onclick = ()=>{
+  const kw = (document.getElementById('kw').value||'').trim();
+  const rows = ALL_ROWS.filter(r=>(r.姓名||'').includes(kw)||(r.站号||'').includes(kw)||(r.地址||'').includes(kw));
+  drawAllPoints(rows); renderList(rows, `搜索「${kw}」结果`);
+};
+
+document.getElementById('btnShowAll').onclick = ()=>{ drawAllPoints(ALL_ROWS); renderList(ALL_ROWS,'全部站点'); };
+
+document.getElementById('btnExportKML').onclick = ()=>exportKML(ALL_ROWS);
+document.getElementById('btnExportCSV').onclick = ()=>exportCSV(ALL_ROWS);
+</script>
+</body>
+</html>
