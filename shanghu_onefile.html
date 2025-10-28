@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>商户地图（单文件·即开即用）</title>
+<style>
+  html,body,#map{height:100%;margin:0}
+  .ui{position:absolute;top:10px;left:10px;z-index:9;background:#fff;border-radius:12px;
+      padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,.15);font:14px/1.6 -apple-system,'PingFang SC','Microsoft YaHei',sans-serif;max-width:780px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+  .btn{padding:6px 10px;border:1px solid #e5e5e5;border-radius:8px;background:#fff;cursor:pointer}
+  .ip{height:32px;border:1px solid #e5e5e5;border-radius:8px;padding:0 10px}
+  .small{font-size:12px;color:#666}
+  .list{max-height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:6px;margin-top:6px}
+  .item{padding:4px 0;border-bottom:1px dashed #eee}.item:last-child{border-bottom:none}
+  .tag{display:inline-block;padding:2px 6px;border-radius:999px;background:#1677ff;color:#fff;font-size:12px;margin-left:6px}
+  .today{background:#ff6d00}
+  .bar{width:460px;height:8px;background:#f1f1f1;border-radius:999px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:#1677ff;transition:width .2s}
+
+  .log{position:absolute;left:10px;bottom:10px;z-index:9;background:rgba(0,0,0,.65);
+       color:#fff;border-radius:8px;max-width:620px;max-height:40vh;overflow:auto;
+       font:12px/1.6 ui-monospace,Consolas,monospace;padding:8px 28px 8px 10px;display:none}
+  .log .x{position:absolute;right:6px;top:4px;border:none;background:transparent;
+          color:#fff;font-size:16px;cursor:pointer;line-height:1}
+</style>
+
+<!-- 必须在 SDK 之前设置安全密钥（你的 securityJsCode） -->
+<script>
+  window._AMapSecurityConfig = { securityJsCode: "d9ca5519268c9fc0e9d8e1da9cc03a28" };
+</script>
+<!-- 高德 JS API + 地理编码插件（你的 key） -->
+<script src="https://webapi.amap.com/maps?v=2.0&key=7d26448f257946798a105c1bc02d653b&plugin=AMap.Geocoder"></script>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="ui">
+  <div><b>商户地图 · 单文件版</b>
+    <span class="tag" id="tagAll">全部 0</span>
+    <span class="tag today" id="tagToday">今日待激活 0</span>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="btnRun">重新加载（在线编码）</button>
+    <div class="bar"><i id="p"></i></div>
+    <span id="msg" class="small">首次会在线地理编码，耐心等几秒～</span>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="chkAll" checked/> 显示全部</label>
+    <label><input type="checkbox" id="chkToday" checked/> 显示今日待激活</label>
+    <input class="ip" id="kw" placeholder="搜索名称/地址/电话/商户号" style="flex:1 1 260px"/>
+    <button class="btn" id="btnSearch">搜索</button>
+    <button class="btn" id="btnShowAll">显示全部</button>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="btnLocate">📍 定位</button>
+    <input class="ip" id="lng" placeholder="经度" style="width:120px"/>
+    <input class="ip" id="lat" placeholder="纬度" style="width:120px"/>
+    <button class="btn" id="btnUse">用坐标</button>
+    <button class="btn" id="btnNearest">🔎 最近10个</button>
+    <button class="btn" id="btnRoute">🧭 顺路拜访</button>
+    <button class="btn" id="btnClear">清路线</button>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="btnCSV">⬇️ 导出 CSV</button>
+    <button class="btn" id="btnKML">⬇️ 导出 KML</button>
+    <span class="small">（导出当前筛选后的点）</span>
+  </div>
+
+  <div id="stat" class="small">—</div>
+  <div id="list" class="list"></div>
+</div>
+
+<div class="log" id="log">
+  <button id="logClose" class="x" title="关闭">×</button>
+</div>
+
+<script>
+/* ================== 数据：全部 & 今日待激活 ================== */
+const RAW_ALL = [
+  {name:"商户_闫涵", addr:"兴隆路10号", phone:"13325009494", mch:"105000479953210", subwx:"微信814221549", subali:"支付宝2088970723467122"},
+  {name:"商户_姜爱君", addr:"李沧区延川路1号A-11号网点", phone:"", mch:"105000479953213", subwx:"微信814442663", subali:"支付宝2088970739600832"},
+  {name:"商户_张亚丽", addr:"威海路262号美宁商务楼", phone:"15315996321", mch:"105000479953217", subwx:"微信814443314", subali:"支付宝2088970740907515"},
+  {name:"商户_崔宝", addr:"台东七路与顺兴路交叉口", phone:"", mch:"105000479953219", subwx:"微信814442789", subali:"支付宝2088970741303022"},
+  {name:"商户_范婷婷", addr:"延吉路77号1-2网点", phone:"13061398069", mch:"105000479953227", subwx:"微信814557557", subali:"支付宝2088970750039545"},
+  {name:"商户_王珍珍", addr:"兴德路96号-2", phone:"15854239667", mch:"105000479953255", subwx:"微信816708110", subali:"支付宝2088080024554435"},
+  {name:"商户_田惠", addr:"大港一路59号", phone:"13505428583", mch:"105000479953258", subwx:"微信816708033", subali:"支付宝2088080024949615"},
+  {name:"商户_薛婧", addr:"辽阳西路2号", phone:"13969729607", mch:"105000479953273", subwx:"微信817038027", subali:"支付宝2088080048186119"},
+  {name:"李沧区悦厨源餐饮店(个体工商户)", addr:"黑龙江中路649号E01", phone:"15712706395", mch:"105012158129339", subwx:"微信817049675", subali:"支付宝2088080047581948"},
+  {name:"市北区爱诺泽星数码科技服务中心(个体工商户)", addr:"辽宁路147号百脑汇0H18", phone:"18605329800", mch:"105000150453987", subwx:"微信817130325", subali:"支付宝2088080052675650"},
+  {name:"商户_刘焕斌", addr:"万年泉路116号", phone:"18953220501", mch:"105000479953281", subwx:"微信817130729", subali:"支付宝105000479953281"},
+  {name:"商户_王知文", addr:"人民路130号", phone:"18661920863", mch:"105000479953282", subwx:"微信817130641", subali:"支付宝2088080055589248"},
+  {name:"商户_甘延真", addr:"夏庄路1号乐客城B1-D-08-15号", phone:"17191090195", mch:"105000479953301", subwx:"微信817346325", subali:"支付宝2088080067181782"},
+  {name:"商户_牛庆斋", addr:"夏庄路1号伟东乐客城负一悦街A-29-1", phone:"13615423696", mch:"105000479953345", subwx:"微信818391433", subali:"支付宝2088080148535343"},
+  {name:"青岛市李沧区屿岸线互联网科技工作室", addr:"李沧区宾川路51-38号", phone:"18105324252", mch:"105000373724202", subwx:"微信818634197", subali:"支付宝2088080166243842"},
+  {name:"市北区武哥百货店", addr:"台东七路与顺兴路交叉口", phone:"18661980333", mch:"105006753316545", subwx:"微信818637066", subali:"支付宝2088080166669020"},
+  {name:"黄岛区优宝来玩具销售店", addr:"胶南 边哥客户 具体地址需要打电话问", phone:"18561787096", mch:"105000159452778", subwx:"微信819178281", subali:"支付宝2088080203838459"},
+  {name:"商户_江福春", addr:"金沙滩路966号金沙滩凤凰之声大剧院夜市", phone:"18769770196", mch:"105000479953407", subwx:"微信819878153", subali:"支付宝2088080272614545"},
+  {name:"商户_王海洋", addr:"太行山一支路47号网点", phone:"17669866985", mch:"105000479953406", subwx:"微信819877471", subali:"支付宝2088080270735235"},
+  {name:"黄岛区我爱吃便利店", addr:"江山南路11号6号鲁商蓝岸国际1号楼商2号", phone:"15563919457", mch:"105000654623847", subwx:"微信819878952", subali:"支付宝2088080270156148"},
+  {name:"商户_王莉", addr:"吴江路298号", phone:"19105323030", mch:"105000479953430", subwx:"微信820203049", subali:"支付宝2088080291826341"},
+  {name:"商户_邹洪永", addr:"珠江路106号凤凰城31-14网点", phone:"19862238880", mch:"105000479953429", subwx:"微信820202994", subali:"支付宝2088080294048669"},
+  {name:"商户_赵艳", addr:"长白山路822-12号商铺", phone:"13326308370", mch:"105000479953426", subwx:"微信820203270", subali:"支付宝2088080291274230"},
+  {name:"商户_李艳洁", addr:"薛家岛街道嘉陵江东路487号内2号网点1层101号", phone:"15305424999", mch:"105000479953425", subwx:"微信820202697", subali:"支付宝2088080294131950"},
+  {name:"商户_张新晓", addr:"团结路于汾河路交叉口", phone:"13869811345", mch:"105000479953449", subwx:"微信820750114", subali:"支付宝2088080331002823"},
+  {name:"商户_薛红", addr:"洞庭山路", phone:"13165161969", mch:"105000479953453", subwx:"微信820887845", subali:"支付宝2088080336265755"},
+  {name:"商户_鲍金海", addr:"钱塘江路268号-6网点", phone:"18660233639", mch:"105000479953464", subwx:"微信821085249", subali:"支付宝2088080350756363"}
+];
+const RAW_TODAY = [
+  {name:"商户_闫涵", addr:"兴隆路10号", phone:"13325009494", mch:"105000479953210", subwx:"微信814221549", subali:"支付宝2088970723467122"},
+  {name:"商户_张亚丽", addr:"威海路262号美宁商务楼", phone:"15315996321", mch:"105000479953217", subwx:"微信814443314", subali:"支付宝2088970740907515"},
+  {name:"市北区武哥百货店", addr:"台东七路与顺兴路交叉口", phone:"18661980333", mch:"105006753316545", subwx:"微信818637066", subali:"支付宝2088080166669020"},
+  {name:"青岛市李沧区屿岸线互联网科技工作室", addr:"李沧区宾川路51-38号", phone:"18105324252", mch:"105000373724202", subwx:"微信818634197", subali:"支付宝2088080166243842"},
+  {name:"商户_甘延真", addr:"夏庄路1号乐客城B1-D-08-15号", phone:"17191090195", mch:"105000479953301", subwx:"微信817346325", subali:"支付宝2088080067181782"},
+  {name:"商户_牛庆斋", addr:"夏庄路1号伟东乐客城负一悦街A-29-1", phone:"13615423696", mch:"105000479953345", subwx:"微信818391433", subali:"支付宝2088080148535343"},
+  {name:"商户_王知文", addr:"人民路130号", phone:"18661920863", mch:"105000479953282", subwx:"微信817130641", subali:"支付宝2088080055589248"},
+  {name:"商户_刘焕斌", addr:"万年泉路116号", phone:"18953220501", mch:"105000479953281", subwx:"微信817130729", subali:"支付宝105000479953281"},
+  {name:"商户_薛婧", addr:"辽阳西路2号", phone:"13969729607", mch:"105000479953273", subwx:"微信817038027", subali:"支付宝2088080048186119"},
+  {name:"李沧区悦厨源餐饮店(个体工商户)", addr:"黑龙江中路649号E01", phone:"15712706395", mch:"105012158129339", subwx:"微信817049675", subali:"支付宝2088080047581948"},
+  {name:"市北区爱诺泽星数码科技服务中心(个体工商户)", addr:"辽宁路147号百脑汇0H18", phone:"18605329800", mch:"105000150453987", subwx:"微信817130325", subali:"支付宝2088080052675650"},
+  {name:"商户_范婷婷", addr:"延吉路77号1-2网点", phone:"13061398069", mch:"105000479953227", subwx:"微信814557557", subali:"支付宝2088970750039545"},
+  {name:"商户_田惠", addr:"大港一路59号", phone:"13505428583", mch:"105000479953258", subwx:"微信816708033", subali:"支付宝2088080024949615"},
+  {name:"商户_王珍珍", addr:"兴德路96号-2", phone:"15854239667", mch:"105000479953255", subwx:"微信816708110", subali:"支付宝2088080024554435"}
+];
+
+/* ================== 地图与工具函数 ================== */
+const CITY = "青岛市";
+const CENTER = [120.3552, 36.0826];
+const map = new AMap.Map('map',{zoom:11,center:CENTER});
+const info = new AMap.InfoWindow({offset:new AMap.Pixel(0,-10)});
+let geocoder = new AMap.Geocoder({ city: CITY });
+
+const SLEEP = ms => new Promise(r=>setTimeout(r,ms));
+const logEl = ()=>document.getElementById('log');
+const showLog = ()=>{logEl().style.display='block';};
+const hideLog = ()=>{logEl().style.display='none';};
+document.getElementById('logClose').onclick = hideLog;
+
+const log = (...a)=>{
+  const el=logEl();
+  el.textContent += a.join(' ')+'\n';
+  el.appendChild(Object.assign(document.createElement('span'),{style:'display:inline-block;width:1px;height:1px'}));
+  el.scrollTop=el.scrollHeight;
+};
+const setP = (i,t)=>document.getElementById('p').style.width=(t?Math.round(i*100/t):0)+'%';
+
+function card(r){
+  const nav = (r.lng&&r.lat) ? `https://uri.amap.com/navigation?to=${r.lng},${r.lat},${encodeURIComponent(r.name||'目标')}&mode=car` : '';
+  return `<div style="font-size:14px;line-height:1.6;">
+    <b>${r.name||'未名'}</b>
+    <div>地址：${r.addr||''}</div>
+    <div>电话：${r.phone||'—'}</div>
+    <div>商户号：${r.mch||'—'}</div>
+    <div>${r.subwx||''}；${r.subali||''}</div>
+    ${nav ? `<div style="margin-top:6px;"><a href="${nav}" target="_blank" style="color:#1677ff">🚗 用高德导航</a></div>` : ``}
+  </div>`;
+}
+function H(x1,y1,x2,y2){const R=6371000,t=Math.PI/180,dY=(y2-y1)*t,dX=(x2-x1)*t;const a=Math.sin(dY/2)**2+Math.cos(y1*t)*Math.cos(y2*t)*Math.sin(dX/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
+
+/* ================== 在线地理编码（重试+超时） ================== */
+async function geocodeAll(raw,label){
+  const out=[]; let i=0; setP(0,raw.length);
+  const once = addr => new Promise(resolve=>{
+    let done=false; const timer=setTimeout(()=>{ if(!done){done=true; resolve(null);} },8000);
+    geocoder.getLocation(CITY+addr,(s,res)=>{
+      if(done) return; done=true; clearTimeout(timer);
+      if(s==='complete' && res?.geocodes?.[0]?.location){
+        const L=res.geocodes[0].location; resolve([L.lng,L.lat]);
+      }else resolve(null);
+    });
+  });
+  for(const r of raw){
+    i++; const addr=(r.addr||'').trim();
+    if(!addr){ out.push({...r,lng:null,lat:null}); setP(i,raw.length); continue; }
+    let pos=null, tries=0;
+    while(tries<3 && !pos){ tries++; pos=await once(addr); if(!pos) await SLEEP(300*tries); }
+    if(pos){ out.push({...r,lng:pos[0],lat:pos[1]}); log(`[${label}] ${i}/${raw.length} OK：${r.name}`); }
+    else   { out.push({...r,lng:null,lat:null}); log(`[${label}] ${i}/${raw.length} 无结果：${r.name} ${addr}`); }
+    setP(i,raw.length); await SLEEP(120);
+  }
+  return out;
+}
+
+/* ================== 渲染与交互 ================== */
+let ALL=[], TODAY=[], mkAll=[], mkToday=[], cur=null, line=null;
+
+function addMarkers(rows, isToday){
+  const icon = isToday ? 'https://webapi.amap.com/theme/v1.3/markers/n/mark_r.png'
+                       : 'https://webapi.amap.com/theme/v1.3/markers/n/mark_b.png';
+  const arr=[];
+  rows.filter(r=>r.lng&&r.lat).forEach(r=>{
+    const m=new AMap.Marker({position:[r.lng,r.lat],title:r.name||'',icon});
+    m.on('click',()=>info.setContent(card(r))||info.open(map,m.getPosition()));
+    map.add(m); arr.push(m);
+  });
+  return arr;
+}
+function fit(){const its=[...mkAll,...mkToday]; if(its.length) map.setFitView(its,true,[80,80,80,360],16);}
+function visible(ms,v){ms.forEach(m=>m[v?'show':'hide']());}
+function shown(){
+  const A=document.getElementById('chkAll').checked, T=document.getElementById('chkToday').checked;
+  const a=A?ALL.filter(r=>r.lng&&r.lat):[], b=T?TODAY.filter(r=>r.lng&&r.lat):[];
+  const seen=new Set(), out=[]; [...a,...b].forEach(r=>{const k=r.lng+','+r.lat+'|'+(r.name||''); if(!seen.has(k)){seen.add(k); out.push(r);} });
+  return out;
+}
+function list(rows,title){
+  document.getElementById('stat').innerHTML = `${title}：<b>${rows.length}</b> 个`;
+  const panel=document.getElementById('list'); panel.innerHTML='';
+  rows.forEach((r,i)=>{
+    const nav = r.lng&&r.lat ? `https://uri.amap.com/navigation?to=${r.lng},${r.lat},${encodeURIComponent(r.name||'目标')}&mode=car` : '';
+    const d=document.createElement('div'); d.className='item';
+    d.innerHTML = `<b>${i+1}. ${r.name||'未名'}</b>${r._dist!=null?` <span class="small">· ${(r._dist/1000).toFixed(2)}km</span>`:''}
+                   <br/>地址：${r.addr||''}${r.phone?` · 📞${r.phone}`:''}${nav?`<br/><a href="${nav}" target="_blank">🚗 导航</a>`:''}`;
+    panel.appendChild(d);
+  });
+}
+function route(order,start){
+  if(line){map.remove(line); line=null;}
+  const path=[[start.lng,start.lat],...order.map(p=>[p.lng,p.lat])];
+  line=new AMap.Polyline({path,strokeWeight:6,strokeColor:'#1677ff',strokeOpacity:.85});
+  map.add(line); map.setFitView([line,...mkAll,...mkToday],true,[60,60,60,360],16);
+}
+
+/* ================== 导出 ================== */
+function saveFile(name,txt,type){const b=new Blob([txt],{type});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();URL.revokeObjectURL(a.href);}
+document.getElementById('btnCSV').onclick=()=>{
+  const rows=shown();
+  const head='名称,地址,电话,商户号,微信二级,支付宝二级,经度,纬度\n';
+  const body=rows.map(r=>[r.name||'',r.addr||'',r.phone||'',r.mch||'',r.subwx||'',r.subali||'',r.lng||'',r.lat||'']
+    .map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  saveFile('商户_当前筛选.csv', head+body, 'text/csv;charset=utf-8');
+};
+document.getElementById('btnKML').onclick=()=>{
+  const rows=shown().filter(r=>r.lng&&r.lat);
+  const ps=rows.map(r=>`<Placemark><name>${r.name||'标注'}</name><description><![CDATA[地址：${r.addr||''}<br/>电话：${r.phone||'—'}<br/>商户号：${r.mch||'—'}<br/>${r.subwx||''}；${r.subali||''}]]></description><Point><coordinates>${r.lng},${r.lat},0</coordinates></Point></Placemark>`).join('\n');
+  const kml=`<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>商户_当前筛选</name>${ps}</Document></kml>`;
+  saveFile('商户_当前筛选.kml', kml, 'application/vnd.google-earth.kml+xml');
+};
+
+/* ================== 主流程：在线编码+渲染 ================== */
+async function runAll(){
+  showLog(); // 展示日志面板
+  document.getElementById('msg').textContent='在线编码（全部商户）…';
+  const A=await geocodeAll(RAW_ALL,'全部');
+  document.getElementById('msg').textContent='在线编码（今日待激活）…';
+  const T=await geocodeAll(RAW_TODAY,'今日');
+
+  // 清空旧图层
+  [mkAll,mkToday].forEach(arr=>{ if(arr.length){map.remove(arr);} });
+  if(line){map.remove(line); line=null;}
+
+  ALL=A; TODAY=T;
+  document.getElementById('tagAll').textContent=`全部 ${ALL.length}`;
+  document.getElementById('tagToday').textContent=`今日待激活 ${TODAY.length}`;
+
+  mkAll   = addMarkers(ALL,false);
+  mkToday = addMarkers(TODAY,true);
+  fit(); list(shown(),'当前显示');
+  document.getElementById('msg').textContent='完成（已加载到地图）。';
+
+  setTimeout(hideLog, 1200); // 自动收起日志
+}
+
+/* ================== 交互绑定 ================== */
+document.getElementById('btnRun').onclick=runAll;
+document.getElementById('chkAll').onchange = ()=>{visible(mkAll,document.getElementById('chkAll').checked); list(shown(),'当前显示');};
+document.getElementById('chkToday').onchange= ()=>{visible(mkToday,document.getElementById('chkToday').checked); list(shown(),'当前显示');};
+document.getElementById('btnShowAll').onclick=()=>{visible(mkAll,true);visible(mkToday,true);document.getElementById('chkAll').checked=true;document.getElementById('chkToday').checked=true;fit();list(shown(),'当前显示');};
+document.getElementById('btnSearch').onclick=()=>{const kw=(document.getElementById('kw').value||'').trim(); if(!kw){list(shown(),'当前显示');return;}
+  const rows=shown().filter(r=>(r.name||'').includes(kw)||(r.addr||'').includes(kw)||(r.phone||'').includes(kw)||(r.mch||'').includes(kw));
+  list(rows,'搜索“'+kw+'”');
+};
+document.getElementById('btnLocate').onclick=()=>{ if(navigator.geolocation){ navigator.geolocation.getCurrentPosition(p=>{
+  cur={lng:p.coords.longitude,lat:p.coords.latitude}; new AMap.Marker({position:[cur.lng,cur.lat],map,title:'我的位置'});
+  map.setZoomAndCenter(13,[cur.lng,cur.lat]);
+});}};
+document.getElementById('btnUse').onclick=()=>{ const lng=parseFloat(document.getElementById('lng').value), lat=parseFloat(document.getElementById('lat').value);
+  if(isFinite(lng)&&isFinite(lat)){ cur={lng,lat}; new AMap.Marker({position:[lng,lat],map,title:'我的位置'}); map.setZoomAndCenter(13,[lng,lat]); }
+};
+document.getElementById('btnNearest').onclick=()=>{ if(!cur){alert('请先定位或输入坐标');return;}
+  const rows=shown().map(r=>({...r,_dist:H(cur.lng,cur.lat,r.lng,r.lat)})).sort((a,b)=>a._dist-b._dist).slice(0,10);
+  list(rows,'最近10个');
+};
+document.getElementById('btnRoute').onclick=()=>{ if(!cur){alert('请先定位或输入坐标');return;}
+  let left=shown().slice(), order=[], c={...cur};
+  while(left.length){ left.forEach(p=>p._d=H(c.lng,c.lat,p.lng,p.lat)); left.sort((a,b)=>a._d-b._d); const nxt=left.shift(); order.push(nxt); c={lng:nxt.lng,lat:nxt.lat}; }
+  list(order,'顺路拜访'); route(order,cur);
+};
+document.getElementById('btnClear').onclick=()=>{ if(line){map.remove(line); line=null;} list(shown(),'当前显示'); };
+
+/* 自动跑一遍，开箱即用 */
+runAll();
+</script>
+</body>
+</html>
